@@ -34,7 +34,9 @@ namespace reservoir {
 
 namespace _detail {
 struct gather_selection {
-    static constexpr const char *name = "gather";
+    static const std::string name() {
+        return "gather";
+    }
 };
 } // namespace _detail
 

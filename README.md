@@ -1,6 +1,6 @@
 # Communication-Efficient Weighted Reservoir Sampling
 
-This is the code to accompany the paper "Communication-Efficient (Weighted) Reservoir Sampling" by Peter Sanders and me.
+This is the code to accompany the paper "Communication-Efficient (Weighted) Reservoir Sampling" by Peter Sanders and me. A [preprint](https://arxiv.org/abs/1910.11069) is available online.
 
 ## License
 

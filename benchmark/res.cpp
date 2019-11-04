@@ -13,6 +13,7 @@
 
 #include <reservoir/aggregate.hpp>
 #include <reservoir/ams_select.hpp>
+#include <reservoir/ams_select_multi.hpp>
 #include <reservoir/btree_multiset.hpp>
 #include <reservoir/generators/select.hpp>
 #include <reservoir/logger.hpp>
@@ -48,6 +49,12 @@ using res = reservoir::reservoir<T, select, reservoir::generators::select_t>;
 template <typename T>
 using res_gather =
     reservoir::reservoir_gather<T, reservoir::generators::select_t>;
+
+template <int d>
+struct amm_wrapper {
+    template <typename T>
+    using type = reservoir::ams_select_multi<T, d>;
+};
 
 struct arguments {
     size_t batch_size;
@@ -115,7 +122,7 @@ auto run(const arguments &args, input_gen_t &&input_gen,
     bool debug = log;
 
     LOGR << "Using " << input_name << " input generator";
-    LOGR << "Using " << reservoir_t::select_type::name << " selection";
+    LOGR << "Using " << reservoir_t::select_type::name() << " selection";
     reservoir_t res(comm_, args.sample_size, args.seed);
 
     reservoir::generators::select_t rng(
@@ -213,11 +220,11 @@ auto run(const arguments &args, input_gen_t &&input_gen,
                     << " recdepth=" << stats.sel_stats.depth.mean()
                     << " recdepthdev=" << stats.sel_stats.depth.stdev() << " "
                     << args << " input=" << input_name
-                    << " selection=" << reservoir_t::select_type::name;
+                    << " selection=" << reservoir_t::select_type::name();
 
                 LOG << "Arguments: " << args << "; ran for " << round << " rounds";
                 LOG << "Global res stats using "
-                    << reservoir_t::select_type::name << " selection:";
+                    << reservoir_t::select_type::name() << " selection:";
                 sLOG << "\tThroughput:" << tp
                      << "batches/s =" << tp * args.batch_size << "items/s per PE,"
                      << tp * args.batch_size * comm_.size() << "items/s total";
@@ -267,7 +274,7 @@ void benchmark(arguments args, input_gen_t &&input_gen,
 
     for (int iter = -args.warmup_its; iter < args.iterations; iter++) {
         sLOGR1 << "Starting iteration" << iter + 1 << "of" << args.iterations
-               << "with" << reservoir_t::select_type::name << "selection,"
+               << "with" << reservoir_t::select_type::name() << "selection,"
                << input_name << "input";
         reservoir::timer timer;
         auto it_stats =
@@ -296,12 +303,12 @@ void benchmark(arguments args, input_gen_t &&input_gen,
              << " recdepth=" << stats.sel_stats.depth.mean()
              << " recdepthdev=" << stats.sel_stats.depth.stdev() << " " << args
              << " input=" << input_name
-             << " selection=" << reservoir_t::select_type::name;
+             << " selection=" << reservoir_t::select_type::name();
     }
 
     if (args.iterations > 1 && comm_.rank() == 0) {
         LOG1 << "Overall reservoir statistics using "
-             << reservoir_t::select_type::name << " selection, " << input_name
+             << reservoir_t::select_type::name() << " selection, " << input_name
              << " input:";
         double tp = stats.res_stats.get_throughput();
         sLOG1 << "\tThroughput:" << tp << "batches/s =" << tp * args.batch_size
@@ -309,7 +316,7 @@ void benchmark(arguments args, input_gen_t &&input_gen,
               << "items/s total";
         LOG1 << stats.res_stats;
         LOG1 << "Overall selection statistics for "
-             << reservoir_t::select_type::name << ":";
+             << reservoir_t::select_type::name() << ":";
         LOG1 << stats.sel_stats;
         LOG1 << "Overall gen stats: " << stats.gen_stats;
         LOG1 << "Overall batch stats: " << stats.batch_stats;
@@ -333,28 +340,40 @@ int main(int argc, char *argv[]) {
     int iterations = 1;
     double min_time = -1, max_time = 600, mean_offset = 0.0, batch_weight = 1.0,
            rank_weight = 0.0, stdev_offset = 10.0, np_weight = 0.0;
-    bool verbose = false, no_warmup = false, no_ams = false, no_gather = false,
-         no_uniform = false, no_gauss = false;
+    bool verbose = false, no_warmup = false, no_ams = false, no_amm8 = false,
+         no_amm16 = false, no_amm32 = false, no_amm64 = false,
+         no_gather = false, no_uniform = false, no_gauss = false;
+    // bool no_mss_naive = false;
     clp.add_size_t('n', "batchsize", batch_size, "batch size");
     clp.add_size_t('k', "samples", sample_size, "number of samples");
+    clp.add_int('i', "iterations", iterations, "number of iterations");
+
     clp.add_size_t('b', "minbatches", min_batches, "number of batches");
     clp.add_size_t('B', "maxbatches", max_batches, "max number of batches");
-    clp.add_int('i', "iterations", iterations, "number of iterations");
     clp.add_double('t', "mintime", min_time,
                    "minimum number of seconds to run per iteration");
     clp.add_double('T', "maxtime", max_time,
                    "maximum number of seconds to run per iteration");
+
     clp.add_double('m', "mean", mean_offset, "mean of gaussian input");
     clp.add_double('w', "batchweight", batch_weight, "weight of batch ID on mean");
     clp.add_double('x', "rankweight", rank_weight, "weight of PE rank on mean");
     clp.add_double('y', "stdev", stdev_offset, "standard deviation constant term");
     clp.add_double('z', "npweight", np_weight, "stdev weight of #PEs");
+
     clp.add_size_t('s', "seed", seed, "seed (0 for random)");
     clp.add_bool('v', "verbose", verbose, "verbose");
     clp.add_bool('W', "no-warmup", no_warmup, "don't do a warmup run");
+
+    clp.add_bool('3', "no-amm8", no_amm8, "don't run ams-multi8");
+    clp.add_bool('4', "no-amm16", no_amm16, "don't run ams-multi16");
+    clp.add_bool('5', "no-amm32", no_amm32, "don't run ams-multi32");
+    clp.add_bool('6', "no-amm64", no_amm64, "don't run ams-multi64");
+
     clp.add_bool('A', "no-ams", no_ams, "don't run ams-select");
     clp.add_bool('X', "no-gather", no_gather,
                  "don't run naive gathering algorithm");
+
     clp.add_bool('U', "no-uniform", no_uniform, "don't run uniform input");
     clp.add_bool('G', "no-gauss", no_gauss, "don't run gauss");
 
@@ -413,6 +432,42 @@ int main(int argc, char *argv[]) {
                                                        comm_);
         if (!no_gauss)
             benchmark<res<int, reservoir::ams_select>>(args, gauss_gen,
+                                                       gauss_name, comm_);
+    }
+
+    if (!no_amm8) {
+        if (!no_uniform)
+            benchmark<res<int, amm_wrapper<8>::type>>(args, uniform_gen, "uni",
+                                                      comm_);
+        if (!no_gauss)
+            benchmark<res<int, amm_wrapper<8>::type>>(args, gauss_gen,
+                                                      gauss_name, comm_);
+    }
+
+    if (!no_amm16) {
+        if (!no_uniform)
+            benchmark<res<int, amm_wrapper<16>::type>>(args, uniform_gen, "uni",
+                                                       comm_);
+        if (!no_gauss)
+            benchmark<res<int, amm_wrapper<16>::type>>(args, gauss_gen,
+                                                       gauss_name, comm_);
+    }
+
+    if (!no_amm32) {
+        if (!no_uniform)
+            benchmark<res<int, amm_wrapper<32>::type>>(args, uniform_gen, "uni",
+                                                       comm_);
+        if (!no_gauss)
+            benchmark<res<int, amm_wrapper<32>::type>>(args, gauss_gen,
+                                                       gauss_name, comm_);
+    }
+
+    if (!no_amm64) {
+        if (!no_uniform)
+            benchmark<res<int, amm_wrapper<64>::type>>(args, uniform_gen, "uni",
+                                                       comm_);
+        if (!no_gauss)
+            benchmark<res<int, amm_wrapper<64>::type>>(args, gauss_gen,
                                                        gauss_name, comm_);
     }
 

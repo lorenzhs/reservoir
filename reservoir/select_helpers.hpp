@@ -115,11 +115,12 @@ struct select_stats<true> {
         for (int i = 0; i <= s.max; i++) {
             os << "\n\tlevel " << i << ": " << s.timers.at(i);
         }
-        os << "\n\trecursion % left: " << s.recleft;
+        if (s.recleft.count() > 0)
+            os << "\n\trecursion % left: " << s.recleft;
         os << "\n\trecursion depth:  " << s.depth;
         os << "\n\tk small/large:    " << s.kcase;
 
-        double norm = static_cast<double>(s.kcase.count()) / 100.0;
+        double norm = static_cast<double>(s.kcase.count()) / 100.0 * s.norm_factor;
         os << "\n\tpivot_idx oob: " << s.pidx_oob << " = " << s.pidx_oob / norm
            << "%, no pivot: " << s.no_pivot << " = " << s.no_pivot / norm << "%";
         os << "\n\tneg split pos: " << s.neg_split_pos << " = "
@@ -167,6 +168,7 @@ struct select_stats<true> {
         split_pos_oob += other.split_pos_oob;
         size_unchanged += other.size_unchanged;
         tinychange += other.tinychange;
+        norm_factor = std::max(norm_factor, other.norm_factor);
         // don't change level
         return *this;
     }
@@ -236,6 +238,7 @@ struct select_stats<true> {
            size_unchanged = 0, tinychange = 0;
     int max = -1;
     int level = -1;
+    int norm_factor = 1;
 };
 
 
@@ -261,45 +264,51 @@ void dump_state(const Seq &seq, const Stats &stats, ssize_t min_idx,
 }
 
 
-template <typename Seq, typename Stats, typename Key = typename Seq::key_type,
-          typename Iterator = typename Seq::const_iterator>
+template <bool do_global_ops, typename Seq, typename Stats,
+          typename Key = typename Seq::key_type, typename Iterator = typename Seq::const_iterator>
 std::tuple<ssize_t, ssize_t, Iterator, Iterator>
 get_bounds(const Seq &seq, Stats &stats_, Key pivot, ssize_t min_idx,
-           ssize_t max_idx, mpi::communicator &comm_,
-           const std::string &short_name, const bool debug) {
+           ssize_t max_idx, Iterator min_it, Iterator max_it,
+           mpi::communicator &comm_, const std::string &short_name,
+           const bool debug) {
     const ssize_t local_size = max_idx - min_idx;
     ssize_t lb_pos, ub_pos;
     Iterator lb_it, ub_it;
 
     if (pivot == std::numeric_limits<Key>::min()) {
         stats_.no_pivot++;
-        pLOG << "No PE found a viable pivot, using max_idx / "
-             << max_idx - min_idx << " max_idx = " << max_idx
-             << " min_idx = " << min_idx;
+        pLOG << "No PE found a viable pivot, using max_idx / " << max_idx - min_idx
+             << " max_idx = " << max_idx << " min_idx = " << min_idx;
         if (local_size == 0) {
             pLOG << "have no elements :(";
             ub_pos = lb_pos = 0;
-            ub_it = lb_it = seq.find_rank(min_idx);
+            ub_it = lb_it = min_it;
         } else {
             ub_pos = lb_pos = local_size;
-            ub_it = lb_it = seq.find_rank(max_idx);
-            pivot = ub_it->first;
-            pLOG << "new pivot: " << pivot;
+            ub_it = lb_it = max_it;
+            if (do_global_ops) {
+                pivot = ub_it->first;
+                pLOG << "new pivot: " << pivot;
+            }
         }
         // select max of all pivots
-        mpi::all_reduce(comm_, mpi::inplace(pivot), mpi::maximum<Key>());
-        LOGR << "agreed on new pivot: " << pivot;
+        if constexpr (do_global_ops) {
+            mpi::all_reduce(comm_, mpi::inplace(pivot), mpi::maximum<Key>());
+            LOGR << "agreed on new pivot: " << pivot;
+        }
         // in case of duplicates, we may get an index larger than max_idx
     } else if (pivot == std::numeric_limits<Key>::max()) {
         stats_.no_pivot++;
         LOGR << "No PE found a viable pivot, using begin";
         ub_pos = lb_pos = 0;
-        ub_it = lb_it = seq.find_rank(min_idx);
-        if (local_size > 0)
-            pivot = ub_it->first;
-        pLOG << "new pivot: " << pivot;
-        // select min of all pivots
-        mpi::all_reduce(comm_, mpi::inplace(pivot), mpi::minimum<Key>());
+        ub_it = lb_it = min_it;
+        if constexpr (do_global_ops) {
+            if (local_size > 0)
+                pivot = ub_it->first;
+            pLOG << "new pivot: " << pivot;
+            // select min of all pivots
+            mpi::all_reduce(comm_, mpi::inplace(pivot), mpi::minimum<Key>());
+        }
     } else {
         // position of smallest item *greater than* pivot
         std::tie(ub_pos, ub_it) = seq.rank_of_upper_bound(pivot);
@@ -325,13 +334,13 @@ get_bounds(const Seq &seq, Stats &stats_, Key pivot, ssize_t min_idx,
                  << " min_idx = " << min_idx;
             ub_pos = lb_pos = 0;
             // TODO is this necessary?
-            ub_it = lb_it = seq.find_rank(min_idx);
+            ub_it = lb_it = min_it;
         } else if (ub_pos > local_size) {
             stats_.split_pos_oob++;
             // all PEs chose an out-of-range pivot in case 1
             LOGR << "all global elements smaller than pivot";
             ub_pos = lb_pos = local_size;
-            ub_it = lb_it = seq.find_rank(max_idx);
+            ub_it = lb_it = max_it;
         }
 
         if (lb_pos < 0) {
@@ -339,12 +348,24 @@ get_bounds(const Seq &seq, Stats &stats_, Key pivot, ssize_t min_idx,
             pLOG1 << "got negative lb pos " << lb_pos
                   << "but non-negative ub pos " << ub_pos << ", using 0";
             lb_pos = 0;
-            lb_it = seq.find_rank(min_idx);
+            lb_it = min_it;
         }
     }
     pLOG << "ub_pos = " << ub_pos << " lb_pos = " << lb_pos;
 
     return std::make_tuple(ub_pos, lb_pos, ub_it, lb_it);
+}
+
+
+template <typename Seq, typename Stats, typename Key = typename Seq::key_type,
+          typename Iterator = typename Seq::const_iterator>
+std::tuple<ssize_t, ssize_t, Iterator, Iterator>
+get_bounds(const Seq &seq, Stats &stats_, Key pivot, ssize_t min_idx,
+           ssize_t max_idx, mpi::communicator &comm_,
+           const std::string &short_name, const bool debug) {
+    Iterator min_it = seq.find_rank(min_idx), max_it = seq.find_rank(max_idx);
+    return get_bounds<true>(seq, stats_, pivot, min_idx, max_idx, min_it,
+                            max_it, comm_, short_name, debug);
 }
 
 

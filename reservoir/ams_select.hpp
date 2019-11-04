@@ -38,8 +38,10 @@ namespace reservoir {
 template <typename Seq>
 class ams_select {
 public:
-    static constexpr const char *name = "ams-select";
     static constexpr const char *short_name = "[ams]";
+    static const std::string name() {
+        return "ams-select";
+    }
 
     using Iterator = typename Seq::const_iterator;
     using Cmp = typename Seq::key_compare;
