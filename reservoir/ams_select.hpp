@@ -55,8 +55,8 @@ public:
     static constexpr bool check = false;
     static constexpr bool time = true;
 
-    // Construct a selector using a given communicator and seed.  The seed needs
-    // to be identical on every PE (member of the communicator)!
+    // Construct a selector using a given communicator and seed.  The seed must
+    // be different on every PE (member of the communicator)!
     ams_select(mpi::communicator &comm, size_t seed)
         : comm_(comm), rng_(seed) {}
 
