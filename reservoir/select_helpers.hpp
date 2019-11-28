@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <iomanip>
 #include <limits>
 #include <numeric>
 #include <ostream>
