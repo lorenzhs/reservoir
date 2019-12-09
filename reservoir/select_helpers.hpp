@@ -397,13 +397,12 @@ find_eq_pos(ssize_t global_ub, ssize_t ub_pos, Iterator ub_it,
     if (global_lb + 1 >= global_ub) {
         LOGR << "Pivot is unique and the result: lb=" << global_lb
              << " ub=" << global_ub << " want " << target_count;
-        // Depending on whether the upper or lower bound matched,
-        // target_count is 0 or 1
-        if (target_count == 0) {
+        // Depending on whether the upper or lower bound matched, target_count
+        // is <= 0 or >= 1. If kmax==kmin, then it will be either 0 or 1.
+        if (target_count <= 0) {
             return std::make_pair(lb_it, min_idx + lb_pos);
         } else {
             spLOG << "LB:" << *lb_it << "UB:" << *ub_it << "returning UB";
-            tlx_die_unless(target_count == 1);
             return std::make_pair(ub_it, min_idx + ub_pos);
         }
     }
