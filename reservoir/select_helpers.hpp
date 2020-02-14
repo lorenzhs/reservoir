@@ -415,9 +415,8 @@ find_eq_pos(ssize_t global_ub, ssize_t ub_pos, Iterator ub_it,
     tlx_die_unless(my_count >= 0);
     // MPI_Scan is an inclusive prefix sum
     mpi::scan(comm_, my_count, prefsum, std::plus<>());
-    spLOGC(debug || my_count > 0)
-        << "Non-unique pivot, global lb:" << global_lb << "ub:" << global_ub
-        << "have" << my_count << "locally, prefsum:" << prefsum;
+    spLOG << "Non-unique pivot, global lb:" << global_lb << "ub:" << global_ub
+          << "have" << my_count << "locally, prefsum:" << prefsum;
 
     if (prefsum < target_count) {
         // return all
