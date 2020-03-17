@@ -288,7 +288,7 @@ get_bounds(const Seq &seq, Stats &stats_, Key pivot, ssize_t min_idx,
             ub_pos = lb_pos = local_size;
             ub_it = lb_it = max_it;
             if (do_global_ops) {
-                pivot = ub_it->first;
+                pivot = Seq::key_of_value::get(*ub_it);
                 pLOG << "new pivot: " << pivot;
             }
         }
@@ -305,7 +305,7 @@ get_bounds(const Seq &seq, Stats &stats_, Key pivot, ssize_t min_idx,
         ub_it = lb_it = min_it;
         if constexpr (do_global_ops) {
             if (local_size > 0)
-                pivot = ub_it->first;
+                pivot = Seq::key_of_value::get(*ub_it);
             pLOG << "new pivot: " << pivot;
             // select min of all pivots
             mpi::all_reduce(comm_, mpi::inplace(pivot), mpi::minimum<Key>());
